@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f8f5" />
+    <meta name="description" content="A thoughtful, private space to keep track of your money." />
+    <title>Milo — your money, made clearer</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <section id="authGate" class="auth-gate" aria-labelledby="authTitle" hidden>
+      <form id="loginForm" class="auth-card">
+        <a class="brand auth-brand" href="#" aria-label="Milo"><span class="brand-mark">m</span><span>milo<span class="brand-period">.</span></span></a>
+        <div class="eyebrow">YOUR PRIVATE WORKSPACE</div>
+        <h1 id="authTitle">Welcome back<span class="heading-period">.</span></h1>
+        <p>Enter your workspace password to open your expense tracker.</p>
+        <label class="form-label" for="loginPassword">Workspace password<input id="loginPassword" name="password" type="password" autocomplete="current-password" required /></label>
+        <div id="loginError" class="form-error hidden" role="alert"></div>
+        <button class="button button-primary auth-submit" id="loginButton" type="submit">Open my tracker <span data-icon="arrow-right"></span></button>
+      </form>
+    </section>
+
+    <div class="app-shell" id="appShell" hidden>
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#overview" aria-label="Milo home"><span class="brand-mark">m</span><span>milo<span class="brand-period">.</span></span></a>
+        <div class="nav-label">WORKSPACE</div>
+        <nav class="side-nav" aria-label="Main navigation">
+          <a class="nav-link active" href="#overview" data-nav="overview"><span class="nav-icon" data-icon="grid"></span>Overview</a>
+          <a class="nav-link" href="#transactions" data-nav="transactions"><span class="nav-icon" data-icon="receipt"></span>Transactions<span class="nav-count" id="navCount">0</span></a>
+          <a class="nav-link" href="#budgets" data-nav="budgets"><span class="nav-icon" data-icon="pie"></span>Budgets</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-tip"><span class="tip-spark">✳</span><p>A little awareness goes a long way.</p><span>You're doing great just by being here.</span></div>
+          <div class="profile"><div class="avatar">Y</div><div class="profile-copy"><strong>Your account</strong><span>Personal space</span></div><span class="profile-dots">···</span></div>
+          <div class="sidebar-foot"><span class="status-dot"></span>Connected · Saved to cloud</div>
+        </div>
+      </aside>
+
+      <main class="main-content" id="overview">
+        <header class="topbar">
+          <button class="mobile-menu" id="mobileMenu" aria-label="Toggle navigation"><span data-icon="menu"></span></button>
+          <div class="crumb"><span>Workspace</span><span class="crumb-slash">/</span><strong>Overview</strong></div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="currencyButton" aria-label="Currency and settings" title="Currency and settings"><span data-icon="settings"></span></button>
+            <div class="topbar-divider"></div>
+            <button class="logout-button" id="logoutButton" type="button">Sign out</button>
+            <div class="top-avatar">Y</div>
+          </div>
+        </header>
+
+        <div class="page-wrap">
+          <section class="welcome-row">
+            <div><div class="eyebrow" id="todayLabel">YOUR PERSONAL FINANCES</div><h1>Money, in a good place<span class="heading-period">.</span></h1><p class="welcome-subtitle">A clearer view of what comes in and what goes out.</p></div>
+            <div class="welcome-actions"><label class="month-picker"><span data-icon="calendar"></span><input type="month" id="monthPicker" aria-label="Choose month" /></label><button class="button button-primary" id="addTransaction"><span data-icon="plus"></span><span>Add transaction</span></button></div>
+          </section>
+
+          <section class="balance-card" aria-label="Account balance">
+            <div class="balance-glow"></div><div class="balance-main"><div class="balance-label"><span class="balance-dot"></span>NET BALANCE THIS MONTH</div><div class="balance-amount" id="balanceAmount">₹0</div><div class="balance-foot" id="balanceFoot">Income minus expenses for this month</div></div>
+            <div class="balance-side"><div class="balance-side-label">Your money at a glance</div><p>Small steps today can make tomorrow feel a little lighter.</p><div class="balance-side-bottom"><span class="balance-side-icon" data-icon="spark"></span><span>You're in control</span></div></div>
+            <div class="balance-orb orb-one"></div><div class="balance-orb orb-two"></div>
+          </section>
+
+          <section class="stats-grid" aria-label="Monthly summary">
+            <article class="stat-card"><div class="stat-top"><div class="stat-icon income-icon" data-icon="arrow-down"></div><span class="stat-label">TOTAL INCOME</span><span class="stat-kicker">This month</span></div><div class="stat-value" id="incomeAmount">₹0</div><div class="stat-bottom"><span class="stat-mini income-mini" data-icon="trending-up"></span><span id="incomeCount">0 deposits</span></div></article>
+            <article class="stat-card"><div class="stat-top"><div class="stat-icon expense-icon" data-icon="arrow-up"></div><span class="stat-label">TOTAL SPENDING</span><span class="stat-kicker">This month</span></div><div class="stat-value" id="expenseAmount">₹0</div><div class="stat-bottom"><span class="stat-mini expense-mini" data-icon="trending-down"></span><span id="expenseCount">0 purchases</span></div></article>
+            <article class="stat-card savings-card"><div class="stat-top"><div class="stat-icon savings-icon" data-icon="leaf"></div><span class="stat-label">SAVINGS RATE</span><span class="stat-kicker">This month</span></div><div class="stat-value" id="savingsRate">—</div><div class="stat-bottom"><span class="savings-bar-track"><span id="savingsBar" class="savings-bar"></span></span><span id="savingsCaption">Add income to get started</span></div></article>
+          </section>
+
+          <section class="insights-grid">
+            <article class="panel category-panel"><div class="panel-heading"><div><div class="eyebrow">WHERE IT GOES</div><h2>Spending breakdown</h2></div><button class="subtle-button" data-go="transactions">Details <span data-icon="arrow-right"></span></button></div><div class="donut-layout" id="donutLayout"><div class="donut-wrap"><div class="donut-chart" id="donutChart"><div class="donut-hole"><span>SPENT THIS MONTH</span><strong id="donutTotal">₹0</strong></div></div></div><div class="category-legend" id="categoryLegend"></div></div><div class="empty-note hidden" id="chartEmpty">Your spending story will appear here once you add a transaction.</div></article>
+            <article class="panel flow-panel"><div class="panel-heading"><div><div class="eyebrow">THE BIG PICTURE</div><h2>Cash flow</h2></div><span class="chart-legend"><i class="legend-income"></i>Income<i class="legend-expense"></i>Spending</span></div><div class="flow-chart" id="flowChart"></div><div class="flow-footer"><span>Last 6 months</span><span class="flow-insight" id="flowInsight">A little progress, month by month.</span></div></article>
+          </section>
+
+          <section class="lower-grid" id="budgets">
+            <article class="panel budget-panel"><div class="panel-heading"><div><div class="eyebrow">A PLAN THAT FEELS RIGHT</div><h2>Monthly budgets</h2></div><button class="round-edit" id="editBudgets" aria-label="Edit budgets" title="Edit budgets"><span data-icon="sliders"></span></button></div><div id="budgetOverview"></div><div id="categoryBudgets" class="category-budgets"></div><button class="text-button" id="manageCategories"><span data-icon="plus"></span>Manage categories</button></article>
+            <article class="panel transactions-panel" id="transactions"><div class="panel-heading transaction-heading"><div><div class="eyebrow">THE LATEST</div><h2>Recent transactions</h2></div><button class="subtle-button" data-go="transactions">View all <span data-icon="arrow-right"></span></button></div>
+              <div class="table-tools"><label class="search-box"><span data-icon="search"></span><input type="search" id="searchInput" placeholder="Search transactions..." /></label><select id="categoryFilter" aria-label="Filter by category"><option value="">All categories</option></select><select id="typeFilter" aria-label="Filter by type"><option value="">All types</option><option value="expense">Expenses</option><option value="income">Income</option></select></div>
+              <div class="table-scroll"><table><thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>DATE</th><th class="amount-cell">AMOUNT</th><th></th></tr></thead><tbody id="transactionRows"></tbody></table><div class="table-empty hidden" id="tableEmpty"><span class="empty-illustration">⌕</span><strong>No transactions here yet</strong><span>Try a different filter, or start by adding one.</span><button class="button button-primary button-small" id="emptyAdd">Add transaction</button></div></div>
+              <div class="pagination"><span id="pageLabel">Showing 0 transactions</span><div><button id="prevPage" class="page-button" aria-label="Previous page">‹</button><button id="nextPage" class="page-button" aria-label="Next page">›</button></div></div>
+            </article>
+          </section>
+          <footer class="page-footer"><span>Made for a little more peace of mind <span class="footer-heart">♥</span></span><button id="exportCsv" class="footer-link"><span data-icon="download"></span>Export data</button></footer>
+        </div>
+      </main>
+    </div>
+
+    <dialog id="transactionDialog" class="modal"><form id="transactionForm" class="modal-card"><div class="modal-header"><div><div class="eyebrow">YOUR MONEY, YOUR WAY</div><h2 id="transactionTitle">Add transaction</h2></div><button type="button" class="modal-close" data-close="transactionDialog" aria-label="Close">×</button></div>
+      <div class="type-switch"><button type="button" data-type="expense" class="type-option active">Expense</button><button type="button" data-type="income" class="type-option">Income</button></div><input type="hidden" id="transactionId" /><input type="hidden" id="transactionType" value="expense" />
+      <label class="form-label">Amount<div class="amount-input"><span id="amountCurrency">₹</span><input id="amountInput" type="number" min="0.01" step="0.01" placeholder="0.00" required /></div></label>
+      <div class="form-row"><label class="form-label">Category<select id="transactionCategory" required></select></label><label class="form-label">Date<input id="transactionDate" type="date" required /></label></div>
+      <label class="form-label">Note <span class="optional">Optional</span><input id="transactionNote" type="text" maxlength="240" placeholder="What was this for?" /></label><div class="form-error hidden" id="transactionError"></div>
+      <div class="modal-actions"><button type="button" class="button button-quiet" data-close="transactionDialog">Cancel</button><button class="button button-primary" type="submit" id="saveTransaction">Save transaction <span data-icon="arrow-right"></span></button></div>
+    </form></dialog>
+
+    <dialog id="budgetDialog" class="modal"><form id="budgetForm" class="modal-card"><div class="modal-header"><div><div class="eyebrow">A LITTLE PLAN GOES A LONG WAY</div><h2>Make your budget</h2></div><button type="button" class="modal-close" data-close="budgetDialog" aria-label="Close">×</button></div><p class="modal-description">Choose a comfortable monthly limit. Leave a category at zero to keep it unbudgeted.</p><label class="form-label">Overall monthly budget<div class="amount-input"><span class="currency-prefix">₹</span><input id="monthBudgetInput" type="number" min="0" step="0.01" placeholder="No overall limit" /></div></label><div class="budget-input-heading">CATEGORY LIMITS</div><div id="budgetInputs" class="budget-input-list"></div><label class="form-label currency-label">Display currency<select id="currencySelect"><option value="INR">Indian rupee · INR</option><option value="USD">US dollar · USD</option><option value="EUR">Euro · EUR</option><option value="GBP">British pound · GBP</option><option value="CAD">Canadian dollar · CAD</option><option value="AUD">Australian dollar · AUD</option><option value="JPY">Japanese yen · JPY</option></select></label><div class="form-error hidden" id="budgetError"></div><div class="modal-actions"><button type="button" class="button button-quiet" data-close="budgetDialog">Cancel</button><button class="button button-primary" type="submit">Save budget</button></div></form></dialog>
+
+    <dialog id="categoryDialog" class="modal"><form id="categoryForm" class="modal-card"><div class="modal-header"><div><div class="eyebrow">MAKE IT YOURS</div><h2>Manage categories</h2></div><button type="button" class="modal-close" data-close="categoryDialog" aria-label="Close">×</button></div><p class="modal-description">Create categories that make sense for your life. Default categories stay available.</p><label class="form-label">New category<div class="inline-add"><input id="categoryName" maxlength="30" placeholder="e.g. Pets, Coffee, Gifts" /><button class="button button-primary" type="submit"><span data-icon="plus"></span>Add</button></div></label><div class="category-manage-list" id="categoryManageList"></div><div class="form-error hidden" id="categoryError"></div><div class="modal-actions"><button type="button" class="button button-primary" data-close="categoryDialog">Done</button></div></form></dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
