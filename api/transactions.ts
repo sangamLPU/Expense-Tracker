@@ -1,5 +1,5 @@
-import { getDb } from "../lib/api/db";
-import { ApiError, methodNotAllowed, readJson, runApi } from "../lib/api/http";
+import { getDb } from "../lib/api/db.js";
+import { ApiError, methodNotAllowed, readJson, runApi } from "../lib/api/http.js";
 import { randomUUID } from "node:crypto";
 
 const validDate = (value: string) => {

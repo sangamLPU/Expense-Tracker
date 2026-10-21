@@ -1,5 +1,5 @@
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
-import { ApiError } from "./errors";
+import { ApiError } from "./errors.js";
 
 type Database = NeonQueryFunction<false, false>;
 let client: Database | undefined;

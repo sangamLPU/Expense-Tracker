@@ -1,5 +1,5 @@
-import { getDb, isUniqueViolation } from "../lib/api/db";
-import { ApiError, methodNotAllowed, readJson, runApi } from "../lib/api/http";
+import { getDb, isUniqueViolation } from "../lib/api/db.js";
+import { ApiError, methodNotAllowed, readJson, runApi } from "../lib/api/http.js";
 
 export function POST(request: Request): Promise<Response> {
   return runApi(request, async () => {

@@ -1,5 +1,5 @@
-import { getDb } from "../../lib/api/db";
-import { ApiError, methodNotAllowed, readJson, runApi } from "../../lib/api/http";
+import { getDb } from "../../lib/api/db.js";
+import { ApiError, methodNotAllowed, readJson, runApi } from "../../lib/api/http.js";
 
 const validDate = (value: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;

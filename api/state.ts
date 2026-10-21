@@ -1,5 +1,5 @@
-import { getDb } from "../lib/api/db";
-import { methodNotAllowed, runApi } from "../lib/api/http";
+import { getDb } from "../lib/api/db.js";
+import { methodNotAllowed, runApi } from "../lib/api/http.js";
 
 export function GET(request: Request): Promise<Response> {
   return runApi(request, async () => {

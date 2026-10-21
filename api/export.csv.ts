@@ -1,5 +1,5 @@
-import { getDb } from "../lib/api/db";
-import { runApi } from "../lib/api/http";
+import { getDb } from "../lib/api/db.js";
+import { runApi } from "../lib/api/http.js";
 
 function csvCell(value: unknown): string {
   let text = String(value ?? "");

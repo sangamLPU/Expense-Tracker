@@ -1,5 +1,5 @@
-import { getDb } from "../lib/api/db";
-import { ApiError, methodNotAllowed, readJson, runApi } from "../lib/api/http";
+import { getDb } from "../lib/api/db.js";
+import { ApiError, methodNotAllowed, readJson, runApi } from "../lib/api/http.js";
 
 const allowedCurrencies = new Set(["INR", "USD", "EUR", "GBP", "CAD", "AUD", "JPY"]);
 

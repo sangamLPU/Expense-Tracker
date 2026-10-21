@@ -1,5 +1,5 @@
-import { getDb, isForeignKeyViolation } from "../../lib/api/db";
-import { ApiError, methodNotAllowed, runApi } from "../../lib/api/http";
+import { getDb, isForeignKeyViolation } from "../../lib/api/db.js";
+import { ApiError, methodNotAllowed, runApi } from "../../lib/api/http.js";
 
 export function DELETE(request: Request): Promise<Response> {
   return runApi(request, async () => {

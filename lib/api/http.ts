@@ -1,6 +1,6 @@
-import { ApiError } from "./errors";
+import { ApiError } from "./errors.js";
 
-export { ApiError } from "./errors";
+export { ApiError } from "./errors.js";
 
 function noStore(response: Response): Response {
   const headers = new Headers(response.headers);
