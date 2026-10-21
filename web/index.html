@@ -4,25 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7f8f5" />
-    <meta name="description" content="A thoughtful, private space to keep track of your money." />
+    <meta name="description" content="A thoughtful space to keep track of your money." />
     <title>Milo — your money, made clearer</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <section id="authGate" class="auth-gate" aria-labelledby="authTitle" hidden>
-      <form id="loginForm" class="auth-card">
-        <a class="brand auth-brand" href="#" aria-label="Milo"><span class="brand-mark">m</span><span>milo<span class="brand-period">.</span></span></a>
-        <div class="eyebrow">YOUR PRIVATE WORKSPACE</div>
-        <h1 id="authTitle">Welcome back<span class="heading-period">.</span></h1>
-        <p>Enter your workspace password to open your expense tracker.</p>
-        <label class="form-label" for="loginPassword">Workspace password<input id="loginPassword" name="password" type="password" autocomplete="current-password" required /></label>
-        <div id="loginError" class="form-error hidden" role="alert"></div>
-        <button class="button button-primary auth-submit" id="loginButton" type="submit">Open my tracker <span data-icon="arrow-right"></span></button>
-      </form>
-    </section>
-
-    <div class="app-shell" id="appShell" hidden>
+    <div class="app-shell" id="appShell">
       <aside class="sidebar" id="sidebar">
         <a class="brand" href="#overview" aria-label="Milo home"><span class="brand-mark">m</span><span>milo<span class="brand-period">.</span></span></a>
         <div class="nav-label">WORKSPACE</div>
@@ -45,12 +33,12 @@
           <div class="topbar-actions">
             <button class="icon-button" id="currencyButton" aria-label="Currency and settings" title="Currency and settings"><span data-icon="settings"></span></button>
             <div class="topbar-divider"></div>
-            <button class="logout-button" id="logoutButton" type="button">Sign out</button>
             <div class="top-avatar">Y</div>
           </div>
         </header>
 
         <div class="page-wrap">
+          <div id="appError" class="form-error hidden" role="alert"></div>
           <section class="welcome-row">
             <div><div class="eyebrow" id="todayLabel">YOUR PERSONAL FINANCES</div><h1>Money, in a good place<span class="heading-period">.</span></h1><p class="welcome-subtitle">A clearer view of what comes in and what goes out.</p></div>
             <div class="welcome-actions"><label class="month-picker"><span data-icon="calendar"></span><input type="month" id="monthPicker" aria-label="Choose month" /></label><button class="button button-primary" id="addTransaction"><span data-icon="plus"></span><span>Add transaction</span></button></div>

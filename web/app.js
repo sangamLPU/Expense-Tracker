@@ -331,70 +331,28 @@ async function start() {
   if (demoMode) {
     state = { ...defaultState, ...getPreviewState() };
     $('#appShell').hidden = false;
-    $('#authGate').hidden = true;
     render();
     const banner = document.createElement('div'); banner.className = 'backend-banner';
-    banner.innerHTML = '<span class="backend-banner-dot"></span><span><strong>Demo mode</strong> · Changes are stored in this browser only. Sign in on the deployed site to use cloud storage.</span>';
+    banner.innerHTML = '<span class="backend-banner-dot"></span><span><strong>Demo mode</strong> · Changes are stored only in this browser and are not synced to the cloud.</span>';
     $('.page-wrap').prepend(banner);
     $('.sidebar-foot').innerHTML = '<span class="status-dot"></span>Demo · Saved in this browser';
-    $('#logoutButton').hidden = true;
     return;
   }
 
   try {
-    const authResponse = await fetch('/api/auth/status', { credentials: 'same-origin' });
-    if (!authResponse.ok) {
-      let message = `Sign-in service failed (${authResponse.status})`;
-      try { message = (await authResponse.json()).error || message; } catch {}
-      throw new Error(message);
-    }
-    const auth = await authResponse.json();
-    if (!auth.authenticated) {
-      $('#appShell').hidden = true;
-      $('#authGate').hidden = false;
-      hideError('#loginError');
-      return;
-    }
     const loaded = await api('/api/state');
     state = { ...defaultState, ...loaded, budgets: loaded.budgets || {}, transactions: loaded.transactions || [], categories: loaded.categories || defaultCategories };
     if (!state.categories.includes('Salary')) state.categories.push('Salary');
     render();
-    $('#authGate').hidden = true;
     $('#appShell').hidden = false;
-    hideError('#loginError');
+    hideError('#appError');
+    $('.sidebar-foot').innerHTML = '<span class="status-dot"></span>Public cloud data · Anyone can access';
   } catch (error) {
-    $('#appShell').hidden = true;
-    $('#authGate').hidden = false;
-    showError('#loginError', error.message || 'Could not connect to the tracker. Check your Vercel setup and try again.');
+    $('#appShell').hidden = false;
+    render();
+    showError('#appError', error.message || 'Could not connect to the tracker. Check your Vercel setup and try again.');
+    $('.sidebar-foot').innerHTML = '<span class="status-dot"></span>Cloud connection unavailable';
   }
 }
-
-$('#loginForm').addEventListener('submit', async event => {
-  event.preventDefault(); hideError('#loginError');
-  const button = $('#loginButton'); button.disabled = true;
-  try {
-    const response = await fetch('/api/auth/login', {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: $('#loginPassword').value })
-    });
-    if (!response.ok) {
-      let message = 'Could not sign in.';
-      try { message = (await response.json()).error || message; } catch {}
-      throw new Error(message);
-    }
-    $('#loginPassword').value = '';
-    await start();
-  } catch (error) {
-    showError('#loginError', error.message || 'Could not sign in.');
-  } finally { button.disabled = false; }
-});
-
-$('#logoutButton').addEventListener('click', async () => {
-  try {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
-    location.reload();
-  } catch { toast('Could not sign out. Please try again.'); }
-});
 
 start();

@@ -1,4 +1,3 @@
-import { isAuthenticated } from "./session";
 import { ApiError } from "./errors";
 
 export { ApiError } from "./errors";
@@ -10,14 +9,10 @@ function noStore(response: Response): Response {
 }
 
 export async function runApi(
-  request: Request,
+  _request: Request,
   action: () => Promise<Response>,
-  options: { publicRoute?: boolean } = {},
 ): Promise<Response> {
   try {
-    if (!options.publicRoute && !isAuthenticated(request)) {
-      throw new ApiError(401, "Please sign in to continue.");
-    }
     return noStore(await action());
   } catch (error) {
     if (error instanceof ApiError) {
