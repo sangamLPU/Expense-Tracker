@@ -19,12 +19,15 @@ static void close_socket(socket_t s) { close(s); }
 #include <atomic>
 #include <chrono>
 #include <cctype>
+#include <csignal>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -284,7 +287,7 @@ public:
 };
 
 struct Request { std::string method, target, path, body; std::map<std::string, std::string> headers; };
-static std::string status_text(int status) { switch (status) { case 200: return "OK"; case 201: return "Created"; case 204: return "No Content"; case 400: return "Bad Request"; case 404: return "Not Found"; case 405: return "Method Not Allowed"; case 413: return "Payload Too Large"; case 500: return "Internal Server Error"; default: return "OK"; } }
+static std::string status_text(int status) { switch (status) { case 200: return "OK"; case 201: return "Created"; case 204: return "No Content"; case 303: return "See Other"; case 400: return "Bad Request"; case 404: return "Not Found"; case 405: return "Method Not Allowed"; case 413: return "Payload Too Large"; case 500: return "Internal Server Error"; default: return "OK"; } }
 static void respond(socket_t s, int status, const std::string& body, const std::string& type = "application/json; charset=utf-8", const std::vector<std::pair<std::string, std::string>>& extra = {}) {
     std::ostringstream head; head << "HTTP/1.1 " << status << ' ' << status_text(status) << "\r\nContent-Type: " << type << "\r\nContent-Length: " << body.size() << "\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n";
     for (const auto& h : extra) head << h.first << ": " << h.second << "\r\n";
@@ -316,10 +319,276 @@ static bool read_request(socket_t s, Request& r) {
 }
 
 static std::string error_json(const std::string& e) { Json j(Json::Object{}); j["error"] = Json(e); return json_text(j); }
+static std::string html_escape(const std::string& value) {
+    std::string out;
+    for (char c : value) {
+        if (c == '&') out += "&amp;";
+        else if (c == '<') out += "&lt;";
+        else if (c == '>') out += "&gt;";
+        else if (c == '\"') out += "&quot;";
+        else if (c == '\'') out += "&#39;";
+        else out += c;
+    }
+    return out;
+}
+static std::map<std::string, std::string> parse_form(const std::string& body) {
+    std::map<std::string, std::string> values;
+    size_t start = 0;
+    while (start <= body.size()) {
+        size_t end = body.find('&', start);
+        std::string pair = body.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        size_t equal = pair.find('=');
+        values[url_decode(pair.substr(0, equal))] = equal == std::string::npos ? "" : url_decode(pair.substr(equal + 1));
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return values;
+}
+static std::map<std::string, std::string> parse_query(const std::string& target) {
+    size_t query = target.find('?');
+    return query == std::string::npos ? std::map<std::string, std::string>{} : parse_form(target.substr(query + 1));
+}
+static std::string url_encode(const std::string& value) {
+    static const char hex[] = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : value) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') out.push_back(static_cast<char>(c));
+        else { out.push_back('%'); out.push_back(hex[c >> 4]); out.push_back(hex[c & 15]); }
+    }
+    return out;
+}
+static std::string current_month() {
+    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y-%m");
+    return out.str();
+}
+static std::string today() {
+    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y-%m-%d");
+    return out.str();
+}
+static bool valid_month(const std::string& month) {
+    return month.size() == 7 && month[4] == '-' && valid_date(month + "-01");
+}
+static std::string currency_symbol(const Json& state) {
+    const auto& value = state.at("currency");
+    const std::string code = value.is_string() ? value.string() : "INR";
+    if (code == "USD" || code == "CAD" || code == "AUD") return "$";
+    if (code == "EUR") return "€";
+    if (code == "GBP") return "£";
+    if (code == "JPY") return "¥";
+    return "₹";
+}
+static std::string money(double amount, const std::string& symbol) {
+    std::ostringstream out;
+    out << symbol << std::fixed << std::setprecision(2) << amount;
+    return out.str();
+}
+static std::string month_label(const std::string& month) {
+    static const char* names[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+    if (!valid_month(month)) return month;
+    int year = std::stoi(month.substr(0, 4)), index = std::stoi(month.substr(5, 2)) - 1;
+    return std::string(names[index]) + " " + std::to_string(year);
+}
+static std::string shifted_month(const std::string& month, int delta) {
+    if (!valid_month(month)) return current_month();
+    int year = std::stoi(month.substr(0, 4)), number = std::stoi(month.substr(5, 2)) - 1 + delta;
+    year += number / 12;
+    number %= 12;
+    if (number < 0) { number += 12; --year; }
+    std::ostringstream out;
+    out << std::setw(4) << std::setfill('0') << year << '-' << std::setw(2) << number + 1;
+    return out.str();
+}
+static double amount_for(const Json::Array& rows, const std::string& month, const std::string& type = {}) {
+    double total = 0;
+    for (const auto& row : rows) {
+        if (row.at("date").is_string() && row.at("date").string().substr(0, 7) == month &&
+            (type.empty() || (row.at("type").is_string() && row.at("type").string() == type)) && row.at("amount").is_number()) total += row.at("amount").number();
+    }
+    return total;
+}
+static std::string html_page_start(const std::string& title) {
+    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light\"><title>" + html_escape(title) + " · Milo</title><link rel=\"stylesheet\" href=\"/styles.css\"></head><body><main class=\"page\">";
+}
+static std::string render_error_page(const std::string& message) {
+    return html_page_start("Something went wrong") + "<section class=\"card error-page\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark\">m</span>milo<span class=\"brand-dot\">.</span></a><p class=\"eyebrow\">REQUEST NOT SAVED</p><h1>That didn’t work.</h1><p>" + html_escape(message) + "</p><a class=\"button primary\" href=\"/\">Back to my tracker</a></section></main></body></html>";
+}
+static std::string render_dashboard(Store& store, const std::string& target) {
+    Json state = store.snapshot();
+    const auto& transactions = state.at("transactions").array();
+    std::string month = current_month(), search, category, type, edit_id;
+    int page = 0;
+    auto query = parse_query(target);
+    if (query.count("month") && valid_month(query["month"])) month = query["month"];
+    if (query.count("q")) search = query["q"];
+    if (query.count("category")) category = query["category"];
+    if (query.count("type")) type = query["type"];
+    if (query.count("page")) { try { page = std::max(0, std::stoi(query["page"])); } catch (...) {} }
+    if (query.count("id") && target.find("/transaction/edit") != std::string::npos) edit_id = query["id"];
+    const std::string symbol = currency_symbol(state);
+    const double income = amount_for(transactions, month, "income"), expenses = amount_for(transactions, month, "expense"), balance = income - expenses;
+    std::map<std::string, double> category_totals;
+    for (const auto& row : transactions) if (row.at("date").is_string() && row.at("date").string().substr(0, 7) == month && row.at("type").is_string() && row.at("type").string() == "expense" && row.at("category").is_string() && row.at("amount").is_number()) category_totals[row.at("category").string()] += row.at("amount").number();
+    static const char* colors[] = {"#2b7058", "#d89470", "#779b76", "#7b86a8", "#c59a49", "#9c7eb4", "#d16f6b", "#5e9fa3", "#9ba56a", "#b77591"};
+    auto color_of = [&](const std::string& name) { size_t index = 0; for (const auto& c : state.at("categories").array()) { if (c.is_string() && c.string() == name) break; ++index; } return std::string(colors[index % (sizeof(colors) / sizeof(colors[0]))]); };
+
+    std::ostringstream out;
+    out << html_page_start("Your money, made clear")
+        << "<header class=\"topbar\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark\">m</span>milo<span class=\"brand-dot\">.</span></a><span class=\"top-note\">YOUR PERSONAL FINANCES</span><a class=\"button quiet\" href=\"/api/export.csv\">Export CSV ↓</a></header>"
+        << "<section class=\"intro\"><div><p class=\"eyebrow\">YOUR PERSONAL FINANCES</p><h1>Your money, <em>made clear.</em></h1><p class=\"muted\">A calmer view of what comes in and where it goes.</p></div><form method=\"get\" class=\"month-form\"><label for=\"month\">Month</label><input id=\"month\" type=\"month\" name=\"month\" value=\"" << html_escape(month) << "\"><button class=\"button primary\">View</button></form></section>"
+        << "<section class=\"summary-grid\"><article class=\"card balance-card\"><p class=\"eyebrow\">NET BALANCE · " << html_escape(month_label(month)) << "</p><div class=\"big-number\">" << money(balance, symbol) << "</div><p class=\"muted\">" << money(income, symbol) << " in <span class=\"separator\">·</span> " << money(expenses, symbol) << " out</p></article>"
+        << "<article class=\"card metric-card\"><p class=\"eyebrow\">INCOME</p><div class=\"metric-number income\">" << money(income, symbol) << "</div><p class=\"muted\">Money in this month</p></article>"
+        << "<article class=\"card metric-card\"><p class=\"eyebrow\">SPENDING</p><div class=\"metric-number expense\">" << money(expenses, symbol) << "</div><p class=\"muted\">Money out this month</p></article>"
+        << "<article class=\"card metric-card\"><p class=\"eyebrow\">SAVINGS RATE</p><div class=\"metric-number\">" << (income > 0 ? std::to_string(static_cast<int>(std::round(balance / income * 100))) + "%" : "—") << "</div><p class=\"muted\">" << (balance >= 0 ? "Kept this month" : "Spending is above income") << "</p></article></section>";
+
+    out << "<section class=\"content-grid\"><article class=\"card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">WHERE IT GOES</p><h2>Spending breakdown</h2></div></div>";
+    if (category_totals.empty()) out << "<p class=\"empty-note\">Your spending story will appear here once you add an expense.</p>";
+    else {
+        double max = expenses > 0 ? expenses : 1;
+        for (const auto& item : category_totals) out << "<div class=\"breakdown-row\"><div class=\"row-top\"><span>" << html_escape(item.first) << "</span><strong>" << money(item.second, symbol) << "</strong></div><div class=\"track\"><span style=\"width:" << std::min(100.0, item.second / max * 100) << "%;background:" << color_of(item.first) << "\"></span></div></div>";
+    }
+    out << "</article><article class=\"card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">OVER TIME</p><h2>Income & spending</h2></div><span class=\"muted\">Last 6 months</span></div><div class=\"flow-chart\">";
+    double peak = 1;
+    for (int i = -5; i <= 0; ++i) peak = std::max(peak, std::max(amount_for(transactions, shifted_month(month, i), "income"), amount_for(transactions, shifted_month(month, i), "expense")));
+    for (int i = -5; i <= 0; ++i) {
+        std::string m = shifted_month(month, i); double in = amount_for(transactions, m, "income"), spent = amount_for(transactions, m, "expense");
+        out << "<div class=\"flow-month\"><div class=\"bars\"><i class=\"bar income-bar\" style=\"height:" << std::max(2.0, in / peak * 100) << "%\" title=\"Income " << money(in, symbol) << "\"></i><i class=\"bar expense-bar\" style=\"height:" << std::max(2.0, spent / peak * 100) << "%\" title=\"Spending " << money(spent, symbol) << "\"></i></div><span>" << html_escape(month_label(m).substr(0, 3)) << "</span></div>";
+    }
+    out << "</div><div class=\"chart-legend\"><span><i class=\"legend-income\"></i>Income</span><span><i class=\"legend-expense\"></i>Spending</span></div></article></section>";
+
+    double month_budget = state.at("monthBudget").is_number() ? state.at("monthBudget").number() : 0;
+    out << "<section class=\"content-grid\"><article class=\"card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">SPEND WITH A PLAN</p><h2>Monthly budget</h2></div></div>";
+    if (month_budget > 0) out << "<div class=\"row-top\"><strong>" << money(expenses, symbol) << " <span class=\"muted\">of " << money(month_budget, symbol) << "</span></strong><span>" << static_cast<int>(std::min(100.0, expenses / month_budget * 100)) << "% used</span></div><div class=\"track\"><span class=\"budget-fill\" style=\"width:" << std::min(100.0, expenses / month_budget * 100) << "%\"></span></div><p class=\"muted\">" << (expenses > month_budget ? money(expenses - month_budget, symbol) + " over your limit" : money(month_budget - expenses, symbol) + " left to spend") << "</p>";
+    else out << "<p class=\"muted\">" << money(expenses, symbol) << " spent so far · Set a monthly limit below to stay on track.</p>";
+    for (const auto& item : state.at("budgets").object()) {
+        if (!item.second.is_number() || item.second.number() <= 0) continue;
+        double spent = category_totals.count(item.first) ? category_totals[item.first] : 0;
+        out << "<div class=\"breakdown-row\"><div class=\"row-top\"><span>" << html_escape(item.first) << "</span><strong>" << money(spent, symbol) << " <span class=\"muted\">of " << money(item.second.number(), symbol) << "</span></strong></div><div class=\"track\"><span class=\"budget-fill\" style=\"width:" << std::min(100.0, spent / item.second.number() * 100) << "%\"></span></div></div>";
+    }
+    out << "</article><article class=\"card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">MAKE A LITTLE PLAN</p><h2>Budget settings</h2></div></div><form method=\"post\" action=\"/settings/save\" class=\"stack-form\"><label>Overall monthly budget<div class=\"input-with-prefix\"><span>" << html_escape(symbol) << "</span><input type=\"number\" min=\"0\" step=\"0.01\" name=\"monthBudget\" value=\"" << (month_budget > 0 ? std::to_string(month_budget) : "") << "\" placeholder=\"No limit\"></div></label><label>Display currency<select name=\"currency\">";
+    const std::pair<const char*, const char*> currencies[] = {{"INR", "Indian rupee · INR"}, {"USD", "US dollar · USD"}, {"EUR", "Euro · EUR"}, {"GBP", "British pound · GBP"}, {"CAD", "Canadian dollar · CAD"}, {"AUD", "Australian dollar · AUD"}, {"JPY", "Japanese yen · JPY"}};
+    for (const auto& currency : currencies) out << "<option value=\"" << currency.first << "\"" << (state.at("currency").is_string() && state.at("currency").string() == currency.first ? " selected" : "") << ">" << currency.second << "</option>";
+    out << "</select></label><details><summary>Category limits</summary><div class=\"category-budget-list\">";
+    for (const auto& c : state.at("categories").array()) if (c.is_string() && c.string() != "Salary") { const auto& value = state.at("budgets").at(c.string()); out << "<label>" << html_escape(c.string()) << "<input type=\"number\" min=\"0\" step=\"0.01\" name=\"budget." << html_escape(c.string()) << "\" value=\"" << (value.is_number() ? std::to_string(value.number()) : "") << "\" placeholder=\"No limit\"></label>"; }
+    out << "</div></details><button class=\"button primary\">Save budgets</button></form></article></section>";
+
+    out << "<section class=\"card transaction-card\" id=\"transactions\"><div class=\"section-heading\"><div><p class=\"eyebrow\">THE LATEST</p><h2>Transactions</h2></div><span class=\"muted\">" << transactions.size() << " total</span></div><form method=\"get\" action=\"/\" class=\"filters\"><input type=\"month\" name=\"month\" value=\"" << html_escape(month) << "\"><input type=\"search\" name=\"q\" value=\"" << html_escape(search) << "\" placeholder=\"Search notes or categories\"><select name=\"category\"><option value=\"\">All categories</option>";
+    for (const auto& c : state.at("categories").array()) if (c.is_string()) out << "<option value=\"" << html_escape(c.string()) << "\"" << (category == c.string() ? " selected" : "") << ">" << html_escape(c.string()) << "</option>";
+    out << "</select><select name=\"type\"><option value=\"\">All types</option><option value=\"expense\"" << (type == "expense" ? " selected" : "") << ">Expenses</option><option value=\"income\"" << (type == "income" ? " selected" : "") << ">Income</option></select><button class=\"button quiet\">Filter</button><a class=\"text-link\" href=\"/?month=" << html_escape(month) << "#transactions\">Clear</a></form><div class=\"table-wrap\"><table><thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>DATE</th><th class=\"align-right\">AMOUNT</th><th></th></tr></thead><tbody>";
+    std::vector<Json> rows;
+    for (const auto& t : transactions) {
+        if (!t.at("date").is_string() || t.at("date").string().substr(0, 7) != month) continue;
+        const std::string cat = t.at("category").is_string() ? t.at("category").string() : "";
+        const std::string ttype = t.at("type").is_string() ? t.at("type").string() : "";
+        const std::string note = t.at("note").is_string() ? t.at("note").string() : "";
+        const std::string haystack = lower(cat + " " + ttype + " " + note);
+        if ((!category.empty() && cat != category) || (!type.empty() && ttype != type) || (!search.empty() && haystack.find(lower(search)) == std::string::npos)) continue;
+        rows.push_back(t);
+    }
+    std::sort(rows.begin(), rows.end(), [](const Json& a, const Json& b) { const std::string ad = a.at("date").is_string() ? a.at("date").string() : "", bd = b.at("date").is_string() ? b.at("date").string() : ""; return ad != bd ? ad > bd : a.at("id").string() > b.at("id").string(); });
+    const size_t page_size = 8, pages = std::max<size_t>(1, (rows.size() + page_size - 1) / page_size);
+    page = std::min<int>(page, static_cast<int>(pages) - 1);
+    size_t first = static_cast<size_t>(page) * page_size, end = std::min(rows.size(), first + page_size);
+    for (size_t i = first; i < end; ++i) {
+        const auto& t = rows[i]; std::string id = t.at("id").is_string() ? t.at("id").string() : "", cat = t.at("category").is_string() ? t.at("category").string() : "", ttype = t.at("type").is_string() ? t.at("type").string() : "expense", note = t.at("note").is_string() ? t.at("note").string() : "";
+        out << "<tr><td><strong>" << html_escape(note.empty() ? cat : note) << "</strong><small>" << (ttype == "income" ? "Money in" : "Money out") << "</small></td><td><span class=\"pill\"><i style=\"background:" << color_of(cat) << "\"></i>" << html_escape(cat) << "</span></td><td>" << html_escape(t.at("date").string()) << "</td><td class=\"align-right " << (ttype == "income" ? "income" : "expense") << "\">" << (ttype == "income" ? "+" : "−") << money(t.at("amount").number(), symbol) << "</td><td class=\"actions\"><a href=\"/transaction/edit?id=" << html_escape(id) << "&amp;month=" << html_escape(month) << "#transaction-form\">Edit</a><form method=\"post\" action=\"/transaction/delete\"><input type=\"hidden\" name=\"id\" value=\"" << html_escape(id) << "\"><input type=\"hidden\" name=\"month\" value=\"" << html_escape(month) << "\"><button class=\"link-button danger\">Delete</button></form></td></tr>";
+    }
+    if (rows.empty()) out << "<tr><td colspan=\"5\" class=\"empty-note\">No matching transactions for " << html_escape(month_label(month)) << ".</td></tr>";
+    out << "</tbody></table></div><div class=\"pagination\"><span>Showing " << (rows.empty() ? 0 : first + 1) << "–" << end << " of " << rows.size() << "</span><div>";
+    auto page_link = [&](int n, const std::string& text) { out << "<a class=\"page-link\" href=\"/?month=" << url_encode(month) << "&amp;q=" << url_encode(search) << "&amp;category=" << url_encode(category) << "&amp;type=" << url_encode(type) << "&amp;page=" << n << "#transactions\">" << text << "</a>"; };
+    if (page > 0) page_link(page - 1, "← Previous"); if (page + 1 < static_cast<int>(pages)) page_link(page + 1, "Next →");
+    out << "</div></div></section>";
+
+    const Json* edit = nullptr;
+    if (!edit_id.empty()) for (const auto& t : transactions) if (t.at("id").is_string() && t.at("id").string() == edit_id) { edit = &t; break; }
+    std::string form_type = edit && edit->at("type").is_string() ? edit->at("type").string() : "expense";
+    std::string form_category = edit && edit->at("category").is_string() ? edit->at("category").string() : (form_type == "income" && has_category(state, "Salary") ? "Salary" : (state.at("categories").array().empty() ? "Other" : state.at("categories").array().front().string()));
+    std::string form_date = edit && edit->at("date").is_string() ? edit->at("date").string() : today();
+    std::string form_note = edit && edit->at("note").is_string() ? edit->at("note").string() : "";
+    out << "<section class=\"content-grid lower-grid\"><article class=\"card\" id=\"transaction-form\"><div class=\"section-heading\"><div><p class=\"eyebrow\">YOUR MONEY, YOUR WAY</p><h2>" << (edit ? "Edit transaction" : "Add a transaction") << "</h2></div>" << (edit ? "<a class=\"text-link\" href=\"/?month=" + html_escape(month) + "#transaction-form\">Cancel edit</a>" : "") << "</div>";
+    out << "<form method=\"post\" action=\"/transaction/save\" class=\"stack-form\"><input type=\"hidden\" name=\"id\" value=\"" << html_escape(edit_id) << "\"><input type=\"hidden\" name=\"month\" value=\"" << html_escape(month) << "\"><label>Type<select name=\"type\"><option value=\"expense\"" << (form_type == "expense" ? " selected" : "") << ">Expense</option><option value=\"income\"" << (form_type == "income" ? " selected" : "") << ">Income</option></select></label><label>Amount<div class=\"input-with-prefix\"><span>" << html_escape(symbol) << "</span><input type=\"number\" min=\"0.01\" max=\"1000000000\" step=\"0.01\" name=\"amount\" value=\"" << (edit && edit->at("amount").is_number() ? std::to_string(edit->at("amount").number()) : "") << "\" placeholder=\"0.00\" required></div></label><label>Category<select name=\"category\" required>";
+    for (const auto& c : state.at("categories").array()) if (c.is_string()) out << "<option value=\"" << html_escape(c.string()) << "\"" << (form_category == c.string() ? " selected" : "") << ">" << html_escape(c.string()) << "</option>";
+    out << "</select></label><label>Date<input type=\"date\" name=\"date\" value=\"" << html_escape(form_date) << "\" required></label><label>Note <span class=\"muted\">optional</span><input type=\"text\" name=\"note\" maxlength=\"240\" value=\"" << html_escape(form_note) << "\" placeholder=\"What was this for?\"></label><button class=\"button primary\">" << (edit ? "Save changes" : "Add transaction") << "</button></form></article>";
+    out << "<article class=\"card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">MAKE IT YOURS</p><h2>Categories</h2></div></div><form method=\"post\" action=\"/categories/add\" class=\"inline-form\"><input type=\"text\" name=\"name\" maxlength=\"30\" placeholder=\"New category\" required><button class=\"button primary\">Add</button></form><div class=\"category-list\">";
+    static const char* defaults[] = {"Food", "Transport", "Shopping", "Bills", "Entertainment", "Health", "Home", "Travel", "Education", "Salary", "Other"};
+    for (const auto& c : state.at("categories").array()) if (c.is_string()) {
+        bool is_default = std::find_if(std::begin(defaults), std::end(defaults), [&](const char* d) { return c.string() == d; }) != std::end(defaults);
+        out << "<div class=\"category-item\"><span><i style=\"background:" << color_of(c.string()) << "\"></i>" << html_escape(c.string()) << "</span>";
+        if (is_default) out << "<small>DEFAULT</small>";
+        else out << "<form method=\"post\" action=\"/categories/delete\"><input type=\"hidden\" name=\"name\" value=\"" << html_escape(c.string()) << "\"><button class=\"link-button danger\">Remove</button></form>";
+        out << "</div>";
+    }
+    out << "</div></article></section><footer class=\"footer\">Milo · Your finances stay on this server. Anyone with this public link can access the tracker.</footer></main></body></html>";
+    return out.str();
+}
+static void redirect_to(socket_t s, const std::string& target) {
+    respond(s, 303, "", "text/plain; charset=utf-8", {{"Location", target}, {"Cache-Control", "no-store"}});
+}
+static bool parse_ipv4(const std::string& host, in_addr* address) {
+#ifdef _WIN32
+    return InetPtonA(AF_INET, host.c_str(), address) == 1;
+#else
+    return inet_pton(AF_INET, host.c_str(), address) == 1;
+#endif
+}
 static void handle(socket_t s, Store& store, const fs::path& web) {
     Request r;
     try {
         if (!read_request(s, r)) return;
+        if ((r.path == "/" || r.path == "/transaction/edit") && (r.method == "GET" || r.method == "HEAD")) {
+            std::string page = render_dashboard(store, r.target);
+            respond(s, 200, r.method == "HEAD" ? "" : page, "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+            return;
+        }
+        if (r.method == "POST" && (r.path == "/transaction/save" || r.path == "/transaction/delete" || r.path == "/settings/save" || r.path == "/categories/add" || r.path == "/categories/delete")) {
+            const auto form = parse_form(r.body);
+            auto field = [&](const std::string& name) { auto it = form.find(name); return it == form.end() ? std::string{} : it->second; };
+            std::string requested_month = valid_month(field("month")) ? field("month") : current_month();
+            if (r.path == "/transaction/save") {
+                if (field("date").size() >= 7 && valid_month(field("date").substr(0, 7))) requested_month = field("date").substr(0, 7);
+                size_t used = 0; double amount = std::stod(field("amount"), &used);
+                if (used != field("amount").size() || !std::isfinite(amount)) throw std::runtime_error("Enter a valid amount.");
+                Json body(Json::Object{}); body["type"] = Json(field("type")); body["amount"] = Json(amount); body["category"] = Json(field("category")); body["date"] = Json(field("date")); body["note"] = Json(field("note"));
+                store.add_or_update(std::move(body), field("id"));
+                redirect_to(s, "/?month=" + requested_month + "#transactions"); return;
+            }
+            if (r.path == "/transaction/delete") {
+                if (!store.erase_transaction(field("id"))) throw HttpError(404, "Transaction not found.");
+                redirect_to(s, "/?month=" + requested_month + "#transactions"); return;
+            }
+            if (r.path == "/settings/save") {
+                Json body(Json::Object{}), budgets(Json::Object{}); size_t used = 0; std::string raw_month_budget = field("monthBudget");
+                double month_budget = raw_month_budget.empty() ? 0 : std::stod(raw_month_budget, &used);
+                if (!raw_month_budget.empty() && (used != raw_month_budget.size() || !std::isfinite(month_budget))) throw std::runtime_error("Enter a valid monthly budget.");
+                Json saved_state = store.snapshot();
+                for (const auto& c : saved_state.at("categories").array()) if (c.is_string()) {
+                    std::string raw = field("budget." + c.string()); if (raw.empty()) continue;
+                    used = 0; double value = std::stod(raw, &used);
+                    if (used != raw.size() || !std::isfinite(value)) throw std::runtime_error("Enter valid category budget amounts.");
+                    if (value > 0) budgets[c.string()] = Json(value);
+                }
+                body["monthBudget"] = Json(month_budget); body["currency"] = Json(field("currency")); body["budgets"] = Json(std::move(budgets));
+                store.set_budgets(body);
+                redirect_to(s, "/?month=" + requested_month); return;
+            }
+            if (r.path == "/categories/add") { Json body(Json::Object{}); body["name"] = Json(field("name")); store.add_category(body); redirect_to(s, "/"); return; }
+            if (r.path == "/categories/delete") { store.delete_category(field("name")); redirect_to(s, "/"); return; }
+        }
         if (r.path == "/api/state" && r.method == "GET") { respond(s, 200, json_text(store.snapshot())); return; }
         if (r.path == "/api/transactions" && (r.method == "POST" || r.method == "PUT")) {
             Json result = store.add_or_update(JsonParser(r.body).parse()); respond(s, r.method == "POST" ? 201 : 200, json_text(result)); return;
@@ -348,35 +617,56 @@ static void handle(socket_t s, Store& store, const fs::path& web) {
         }
         if (r.path.rfind("/api/", 0) == 0) { respond(s, 404, error_json("API route not found")); return; }
         if (r.method != "GET" && r.method != "HEAD") { respond(s, 405, "Method not allowed", "text/plain; charset=utf-8"); return; }
-        std::string asset = r.path == "/" || r.path.empty() ? "index.html" : r.path.substr(1);
-        if (asset.find('/') != std::string::npos || asset.find("..") != std::string::npos || (asset != "index.html" && asset != "app.js" && asset != "styles.css")) { respond(s, 404, "Not found", "text/plain; charset=utf-8"); return; }
+        std::string asset = r.path.empty() ? "index.html" : r.path.substr(1);
+        if (asset.find('/') != std::string::npos || asset.find("..") != std::string::npos || asset != "styles.css") { respond(s, 404, "Not found", "text/plain; charset=utf-8"); return; }
         std::ifstream in(web / asset, std::ios::binary); if (!in) { respond(s, 404, "Web asset not found", "text/plain; charset=utf-8"); return; }
-        std::ostringstream content; content << in.rdbuf(); std::string type = asset.size() >= 4 && asset.substr(asset.size() - 4) == ".css" ? "text/css; charset=utf-8" : asset.size() >= 3 && asset.substr(asset.size() - 3) == ".js" ? "text/javascript; charset=utf-8" : "text/html; charset=utf-8";
+        std::ostringstream content; content << in.rdbuf(); std::string type = "text/css; charset=utf-8";
         if (r.method == "HEAD") respond(s, 200, "", type); else respond(s, 200, content.str(), type);
-    } catch (const HttpError& e) { respond(s, e.status, error_json(e.what())); }
-    catch (const std::exception& e) { respond(s, 400, error_json(e.what())); }
-    catch (...) { respond(s, 500, error_json("Unexpected server error")); }
+    } catch (const HttpError& e) {
+        if (r.path.rfind("/api/", 0) == 0) respond(s, e.status, error_json(e.what()));
+        else respond(s, e.status, render_error_page(e.what()), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}});
+    }
+    catch (const std::exception& e) {
+        if (r.path.rfind("/api/", 0) == 0) respond(s, 400, error_json(e.what()));
+        else respond(s, 400, render_error_page(e.what()), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}});
+    }
+    catch (...) {
+        if (r.path.rfind("/api/", 0) == 0) respond(s, 500, error_json("Unexpected server error"));
+        else respond(s, 500, render_error_page("Unexpected server error."), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}});
+    }
 }
 
 static fs::path find_project_root(const char* argv0) {
-    std::error_code ec; fs::path cwd = fs::current_path(ec); if (fs::exists(cwd / "web" / "index.html")) return cwd;
-    fs::path exe = fs::absolute(argv0, ec); if (!ec) { auto parent = exe.parent_path(); if (fs::exists(parent / "web" / "index.html")) return parent; if (fs::exists(parent.parent_path() / "web" / "index.html")) return parent.parent_path(); if (fs::exists(parent.parent_path().parent_path() / "web" / "index.html")) return parent.parent_path().parent_path(); }
+    std::error_code ec; fs::path cwd = fs::current_path(ec); if (fs::exists(cwd / "web" / "styles.css")) return cwd;
+    fs::path exe = fs::absolute(argv0, ec); if (!ec) { auto parent = exe.parent_path(); if (fs::exists(parent / "web" / "styles.css")) return parent; if (fs::exists(parent.parent_path() / "web" / "styles.css")) return parent.parent_path(); if (fs::exists(parent.parent_path().parent_path() / "web" / "styles.css")) return parent.parent_path().parent_path(); }
     return cwd;
 }
 int main(int argc, char** argv) {
     fs::path root = find_project_root(argv[0]), web = root / "web", data = root / "data" / "expense-tracker.json";
     int port = 8080;
+    std::string host = "127.0.0.1";
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--port" && i + 1 < argc) { try { port = std::stoi(argv[++i]); } catch (...) { std::cerr << "Invalid port\n"; return 1; } }
+        else if (arg == "--host" && i + 1 < argc) host = argv[++i];
         else if (arg == "--data" && i + 1 < argc) data = argv[++i];
         else if (arg == "--web" && i + 1 < argc) web = argv[++i];
-        else { std::cerr << "Usage: expense-tracker [--port 8080] [--data path] [--web path]\n"; return 1; }
+        else { std::cerr << "Usage: expense-tracker [--host 127.0.0.1] [--port 8080] [--data path] [--web path]\n"; return 1; }
     }
     if (port < 1 || port > 65535) { std::cerr << "Port must be between 1 and 65535\n"; return 1; }
 #ifdef _WIN32
     WSADATA wsa{}; if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { std::cerr << "Could not start Winsock\n"; return 1; }
+#else
+    std::signal(SIGPIPE, SIG_IGN);
 #endif
+    in_addr bind_address{};
+    if (!parse_ipv4(host, &bind_address)) {
+        std::cerr << "Host must be a valid IPv4 address\n";
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return 1;
+    }
     Store store(data);
     socket_t server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server == invalid_socket) { std::cerr << "Could not create server socket\n"; return 1; }
@@ -386,9 +676,9 @@ int main(int argc, char** argv) {
 #else
     setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 #endif
-    sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(static_cast<unsigned short>(port)); addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(server, 32) != 0) { std::cerr << "Could not listen on 127.0.0.1:" << port << " (port may be in use)\n"; close_socket(server); return 1; }
-    std::cout << "Expense Tracker is ready at http://127.0.0.1:" << port << "\nData file: " << fs::absolute(data) << "\nPress Ctrl+C to stop.\n" << std::flush;
+    sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(static_cast<unsigned short>(port)); addr.sin_addr = bind_address;
+    if (bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(server, 32) != 0) { std::cerr << "Could not listen on " << host << ':' << port << " (port may be in use)\n"; close_socket(server); return 1; }
+    std::cout << "Expense Tracker is ready at http://" << host << ':' << port << "\nData file: " << fs::absolute(data) << "\nPress Ctrl+C to stop.\n" << std::flush;
     while (true) {
         sockaddr_in client{};
 #ifdef _WIN32
