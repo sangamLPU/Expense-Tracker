@@ -6,26 +6,26 @@ Milo is a server-rendered expense tracker. The HTTP server, page rendering, vali
 
 ## Deploy on a VPS
 
-The included Docker Compose setup runs the C++ application behind Caddy. Caddy obtains and renews HTTPS certificates for your domain.
+Install Docker Engine and the Docker Compose plugin on a Linux VPS. Clone the repository and start the tracker directly on port 8080:
 
-1. Install Docker Engine and the Docker Compose plugin on a Linux VPS.
-2. Point your domain's DNS `A` record to the VPS IPv4 address. Allow inbound TCP ports `80` and `443` in the VPS firewall.
-3. On the VPS, clone the repository and create the environment file:
+```sh
+git clone https://github.com/sangamLPU/Expense-Tracker.git
+cd Expense-Tracker
+docker compose up -d --build
+```
 
-   ```sh
-   git clone https://github.com/sangamLPU/Expense-Tracker.git
-   cd Expense-Tracker
-   cp .env.example .env
-   ```
+Allow inbound TCP port `8080` in the VPS firewall, then open `http://YOUR_VPS_IP:8080`. This IP-only mode uses plain HTTP. The tracker has no sign-in, so anyone who can reach the IP and port can read and change its data.
 
-4. Edit `.env` and set `DOMAIN` to your real domain.
-5. Build and start the services:
+### Optional HTTPS with a domain
 
-   ```sh
-   docker compose up -d --build
-   ```
+To use Caddy and HTTPS, point your domain's DNS `A` record at the VPS IPv4 address and allow inbound TCP ports `80` and `443`. Create `.env` from the example and set `DOMAIN` to a domain you control. Set `TRACKER_BIND_ADDRESS=127.0.0.1` so the app is reached externally through Caddy, then start the HTTPS profile:
 
-Open `https://your-domain`. The C++ tracker is reachable only through Caddy. Data lives in the persistent Docker volume `tracker_data` at `/data/expense-tracker.json`.
+```sh
+cp .env.example .env
+docker compose --profile https up -d --build
+```
+
+Open `https://your-domain`. Caddy obtains and renews the certificate. Data lives in the persistent Docker volume `tracker_data` at `/data/expense-tracker.json`.
 
 ### Update and back up
 
@@ -35,6 +35,8 @@ Run these commands from the repository directory on your VPS to deploy a pushed 
 git pull
 docker compose up -d --build
 ```
+
+For a domain deployment, append `--profile https` to the Compose command.
 
 View application logs with `docker compose logs -f tracker`. Copy a data backup with:
 
@@ -85,5 +87,5 @@ Open `http://127.0.0.1:8080`. On Windows, start `build\Release\expense-tracker.e
 
 - `src/main.cpp` — C++17 HTTP server, server-rendered HTML, validation, REST routes, CSV generation, and persistent storage.
 - `web/styles.css` — responsive presentation styles; no browser-side application code.
-- `Dockerfile`, `docker-compose.yml`, and `Caddyfile` — VPS deployment with persistent storage and HTTPS.
+- `Dockerfile`, `docker-compose.yml`, and `Caddyfile` — VPS deployment with persistent storage, IP-only HTTP, and optional HTTPS.
 - `CMakeLists.txt` — native C++ build configuration.
