@@ -305,7 +305,8 @@ public:
         if (found == rows.end()) return false;
         Json previous = state;
         rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const Json& x) { return x.at("id").is_string() && x.at("id").string() == id; }), rows.end());
-        if (rows.size() != old) save_or_restore(std::move(previous)); return rows.size() != old;
+        if (rows.size() != old) save_or_restore(std::move(previous));
+        return rows.size() != old;
     }
     void set_budgets(const Json& body) {
         std::lock_guard<std::mutex> lock(mutex);
@@ -353,7 +354,8 @@ static void respond(socket_t s, int status, const std::string& body, const std::
     head << "\r\n"; std::string data = head.str() + ((head_only || suppress_response_body) ? std::string{} : body);
     size_t sent = 0; while (sent < data.size()) {
         int n = static_cast<int>(send(s, data.data() + sent, static_cast<int>(std::min<size_t>(data.size() - sent, 65536)), 0));
-        if (n <= 0) break; sent += static_cast<size_t>(n);
+        if (n <= 0) break;
+        sent += static_cast<size_t>(n);
     }
 }
 static bool read_request(socket_t s, Request& r) {
@@ -363,12 +365,14 @@ static bool read_request(socket_t s, Request& r) {
     }
     if (split == std::string::npos || split > 64 * 1024) { respond(s, 413, "{\"error\":\"Headers too large\"}"); return false; }
     std::istringstream headers(data.substr(0, split)); std::string line;
-    if (!std::getline(headers, line)) return false; if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (!std::getline(headers, line)) return false;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
     std::istringstream first(line); std::string version; first >> r.method >> r.target >> version;
     if (r.method == "HEAD") suppress_response_body = true;
     if (r.method.empty() || r.target.empty() || r.target.front() != '/' || (version != "HTTP/1.0" && version != "HTTP/1.1")) { respond(s, 400, "{\"error\":\"Invalid HTTP request line\"}"); return false; }
     while (std::getline(headers, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back(); auto colon = line.find(':');
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        auto colon = line.find(':');
         if (colon == std::string::npos || colon == 0) { respond(s, 400, "{\"error\":\"Invalid request header\"}"); return false; }
         std::string key = lower(trim(line.substr(0, colon))), value = trim(line.substr(colon + 1));
         if (key.empty()) { respond(s, 400, "{\"error\":\"Invalid request header\"}"); return false; }
@@ -612,7 +616,8 @@ static std::string render_dashboard(Store& store, const std::string& target) {
     if (rows.empty()) out << "<tr><td colspan=\"5\" class=\"empty-note\">No matching transactions for " << html_escape(month_label(month)) << ".</td></tr>";
     out << "</tbody></table></div><div class=\"pagination\"><span>Showing " << (rows.empty() ? 0 : first + 1) << "–" << end << " of " << rows.size() << "</span><div>";
     auto page_link = [&](int n, const std::string& text) { out << "<a class=\"page-link\" href=\"/?month=" << url_encode(month) << "&amp;q=" << url_encode(search) << "&amp;category=" << url_encode(category) << "&amp;type=" << url_encode(type) << "&amp;page=" << n << "#transactions\">" << text << "</a>"; };
-    if (page > 0) page_link(page - 1, "← Previous"); if (page + 1 < static_cast<int>(pages)) page_link(page + 1, "Next →");
+    if (page > 0) page_link(page - 1, "← Previous");
+    if (page + 1 < static_cast<int>(pages)) page_link(page + 1, "Next →");
     out << "</div></div></section>";
 
     const Json* edit = nullptr;
@@ -763,16 +768,16 @@ static void handle(socket_t s, Store& store, const fs::path& web) {
         respond(s, 200, content.str(), type, {{"Cache-Control", "public, max-age=0, must-revalidate"}}, r.method == "HEAD");
     } catch (const HttpError& e) {
         if (r.path.rfind("/api/", 0) == 0) respond(s, e.status, error_json(e.what()));
-        else respond(s, e.status, render_error_page(e.what()), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'}});
+        else respond(s, e.status, render_error_page(e.what()), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'"}});
     }
     catch (const std::exception& e) {
         if (r.path.rfind("/api/", 0) == 0) respond(s, 400, error_json(e.what()));
-        else if (is_form_action(r.path)) respond(s, 400, render_error_page(e.what()), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'}});
-        else respond(s, 500, render_error_page("Could not render the tracker page."), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'}});
+        else if (is_form_action(r.path)) respond(s, 400, render_error_page(e.what()), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'"}});
+        else respond(s, 500, render_error_page("Could not render the tracker page."), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'"}});
     }
     catch (...) {
         if (r.path.rfind("/api/", 0) == 0) respond(s, 500, error_json("Unexpected server error"));
-        else respond(s, 500, render_error_page("Unexpected server error."), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'}});
+        else respond(s, 500, render_error_page("Unexpected server error."), "text/html; charset=utf-8", {{"Cache-Control", "no-store"}, {"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; script-src 'none'; object-src 'none'"}});
     }
 }
 
